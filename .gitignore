@@ -1,0 +1,7 @@
+work/
+*.tmp
+*.log
+__pycache__/
+.pytest_cache/
+.venv/
+snapshot-staging/
