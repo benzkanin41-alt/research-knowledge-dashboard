@@ -63,7 +63,7 @@
       if (detailMatch) return jsonResponse(await loadJSON(`data/stocks/${detailMatch[1]}.json`));
 
       const quoteMatch = url.pathname.match(/^\/api\/quotes\/([A-Za-z0-9.\-]+)$/);
-      if (quoteMatch) return jsonResponse(await loadJSON(`data/quotes/${encodeURIComponent(quoteMatch[1].toUpperCase())}.json`));
+      if (quoteMatch) return jsonResponse(await loadJSON(`data/quotes/q-${encodeURIComponent(quoteMatch[1].toUpperCase())}.json`));
 
       return jsonResponse({ error: "ไม่พบข้อมูล Online สำหรับ endpoint นี้" }, 404);
     } catch (error) {

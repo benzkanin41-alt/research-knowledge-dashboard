@@ -14,7 +14,15 @@ DEFAULT_SITE = PROJECT_ROOT / "work" / "site"
 
 
 def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, check=check, text=True, capture_output=True)
+    completed = subprocess.run(command, cwd=cwd, check=False, text=True, capture_output=True)
+    if check and completed.returncode != 0:
+        shown = " ".join(command)
+        raise RuntimeError(
+            f"Command failed ({completed.returncode}): {shown}\n"
+            f"stdout: {completed.stdout.strip()}\n"
+            f"stderr: {completed.stderr.strip()}"
+        )
+    return completed
 
 
 def main() -> int:

@@ -143,7 +143,7 @@ def main() -> int:
     for stock in stocks:
         symbol = str(stock["symbol"]).upper()
         detail_path = site / "data" / "stocks" / f"{stock['id']}.json"
-        quote_path = site / "data" / "quotes" / f"{symbol}.json"
+        quote_path = site / "data" / "quotes" / f"q-{symbol}.json"
         if not detail_path.is_file():
             errors.append(f"ขาด detail {symbol} id={stock['id']}")
             continue

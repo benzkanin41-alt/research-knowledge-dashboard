@@ -357,7 +357,7 @@ def main() -> int:
                         report["parity_failures"].append({"id": stock["id"], "symbol": stock["symbol"], "error": str(exc)})
                         continue
                     write_json(output / "data" / "stocks" / f"{stock['id']}.json", detail)
-                    write_json(output / "data" / "quotes" / f"{stock['symbol']}.json", quote)
+                    write_json(output / "data" / "quotes" / f"q-{stock['symbol']}.json", quote)
                     if quote.get("available"):
                         report["quote_available"] += 1
                     else:
