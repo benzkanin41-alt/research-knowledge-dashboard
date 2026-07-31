@@ -42,7 +42,14 @@ socket.addEventListener("message", (event) => {
     if (message.error) reject(new Error(message.error.message));
     else resolve(message.result);
   } else if (message.method === "Runtime.exceptionThrown") {
-    runtimeExceptions.push(message.params?.exceptionDetails?.text || "Runtime exception");
+    const details = message.params?.exceptionDetails || {};
+    runtimeExceptions.push({
+      text: details.text || "Runtime exception",
+      description: details.exception?.description || "",
+      url: details.url || "",
+      line: details.lineNumber,
+      column: details.columnNumber,
+    });
   }
 });
 
@@ -94,6 +101,7 @@ const expression = `(${async function dashboardQA() {
   metricsTab.click();
   await waitFor(() => !document.querySelector("#tab-metrics")?.classList.contains("hidden"), "metrics tab");
   await waitFor(() => document.querySelector("#metric-frequency") || document.querySelector("#readable-metrics-root"), "metrics controls");
+  await waitFor(() => document.querySelectorAll("#tab-metrics tbody tr").length > 0, "metrics rows");
 
   const metricTopics = [...document.querySelectorAll("#metric-filters [data-metric]")]
     .map((node) => ({ code: node.dataset.metric, label: node.textContent.trim() }));
@@ -106,10 +114,12 @@ const expression = `(${async function dashboardQA() {
 
   document.querySelector('[data-tab="knowledge"]').click();
   await waitFor(() => !document.querySelector("#tab-knowledge")?.classList.contains("hidden"), "knowledge tab");
+  await waitFor(() => (document.querySelector("#knowledge-timeline")?.innerText || "").trim().length > 100, "knowledge content");
   const knowledgeText = document.querySelector("#tab-knowledge")?.innerText || "";
 
   document.querySelector('[data-tab="sources"]').click();
   await waitFor(() => !document.querySelector("#tab-sources")?.classList.contains("hidden"), "sources tab");
+  await waitFor(() => document.querySelectorAll("#sources-table tbody tr").length > 0, "source rows");
   const sourceHeader = document.querySelector("#sources-table thead th:last-child")?.textContent.trim();
 
   return {

@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  window.renderSources = function renderOnlineSources(sources) {
+  function renderOnlineSources(sources) {
     const body = document.querySelector("#sources-table tbody");
     if (!body) return;
     body.innerHTML = (sources || []).map((source) => `<tr>
@@ -11,7 +11,10 @@
       <td>${source.item_count ?? 0}</td>
       <td><span class="online-safe-label">เผยแพร่เฉพาะชื่อไฟล์</span></td>
     </tr>`).join("");
-  };
+  }
+
+  window.__ONLINE_RENDER_SOURCES__ = renderOnlineSources;
+  window.renderSources = renderOnlineSources;
 
   document.addEventListener("DOMContentLoaded", async () => {
     const updateButton = document.querySelector("#update-button");

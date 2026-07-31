@@ -218,6 +218,18 @@ def transform_index(index_html: str) -> str:
     return index_html.replace(script, replacement)
 
 
+def transform_app(app_js: bytes) -> bytes:
+    text = app_js.decode("utf-8")
+    marker = "const v52RenderSources = renderSources;"
+    replacement = (
+        "const v52RenderSources = (...args) => "
+        "(window.__ONLINE_RENDER_SOURCES__ || renderSources)(...args);"
+    )
+    if text.count(marker) != 1:
+        raise RuntimeError("Online source renderer patch expected exactly one v52RenderSources marker")
+    return text.replace(marker, replacement).encode("utf-8")
+
+
 def prepare_output(output: Path) -> None:
     output = output.resolve()
     project = PROJECT_ROOT.resolve()
@@ -293,7 +305,7 @@ def main() -> int:
             app_js = fetch_bytes(f"{base_url}/app.js")
             styles_css = fetch_bytes(f"{base_url}/styles.css")
             write_bytes(output / "index.html", transform_index(index_html).encode("utf-8"))
-            write_bytes(output / "app.js", app_js)
+            write_bytes(output / "app.js", transform_app(app_js))
             write_bytes(output / "styles.css", styles_css)
             for name in ("online-adapter.js", "online-runtime.js", "online.css"):
                 shutil.copy2(TEMPLATE_ROOT / name, output / name)
