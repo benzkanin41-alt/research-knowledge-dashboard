@@ -25,6 +25,9 @@ UNC_PATH_RE = re.compile(r"\\\\[^\s\\/]+[\\/]")
 TOKEN_RE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
 MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_SITE_BYTES = 1024 * 1024 * 1024
+TIDLOR_Q2_2026_F45_DATE = "2026-08-13"
+TIDLOR_Q2_2026_NET_PROFIT_MILLION = 1533.221
+TIDLOR_Q2_2026_ROUNDING_TOLERANCE_MILLION = 1.0
 
 
 def load_json(path: Path) -> Any:
@@ -85,9 +88,28 @@ def validate_known_cases(symbol_to_detail: dict[str, dict[str, Any]]) -> list[st
 
     if tidlor_symbol:
         tidlor = symbol_to_detail[tidlor_symbol]
-        for group in tidlor.get("metric_groups") or []:
-            if period_is_q2_2026(group) and group.get("actual"):
-                errors.append(f"{tidlor_symbol} มีผลจริง 2Q69 ทั้งที่ยังไม่ควรมี")
+        tidlor_q2_actual_groups = [
+            group
+            for group in tidlor.get("metric_groups") or []
+            if period_is_q2_2026(group) and group.get("actual")
+        ]
+        if not tidlor_q2_actual_groups:
+            errors.append(f"{tidlor_symbol} ไม่มีผลจริง 2Q69 หลัง SET ประกาศงบแล้ว")
+        for group in tidlor_q2_actual_groups:
+            actual = group.get("actual") or {}
+            actual_date = str(actual.get("date") or "")[:10]
+            if actual_date < TIDLOR_Q2_2026_F45_DATE:
+                errors.append(f"{tidlor_symbol} ผลจริง 2Q69 มีวันที่ก่อน SET ประกาศงบ: {actual_date or 'ไม่มีวันที่'}")
+            if not actual.get("sources") or not actual.get("supporting_sources"):
+                errors.append(f"{tidlor_symbol} ผลจริง 2Q69 ไม่มี provenance สนับสนุน")
+            if group.get("metric_code") in {"profit", "net_profit"}:
+                value = actual.get("value")
+                if (
+                    not isinstance(value, (int, float))
+                    or abs(float(value) - TIDLOR_Q2_2026_NET_PROFIT_MILLION)
+                    > TIDLOR_Q2_2026_ROUNDING_TOLERANCE_MILLION
+                ):
+                    errors.append(f"{tidlor_symbol} กำไรจริง 2Q69 ไม่ตรง SET F45: {value}")
 
     maguro = symbol_to_detail.get("MAGURO")
     if maguro:
