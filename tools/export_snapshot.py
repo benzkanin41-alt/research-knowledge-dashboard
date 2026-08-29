@@ -99,6 +99,20 @@ def copy_runtime(local_root: Path, runtime_root: Path) -> None:
         shutil.copy2(source, runtime_root / source.name)
     shutil.copy2(local_root / "config.json", runtime_root / "config.json")
     shutil.copytree(local_root / "web", runtime_root / "web", dirs_exist_ok=True)
+    copied_cache_files = 0
+    for cache_name in ("detail_cache_v52", "detail_cache_v59"):
+        source_cache = local_root / "data" / cache_name
+        if not source_cache.is_dir():
+            continue
+        destination_cache = runtime_root / "data" / cache_name
+        destination_cache.mkdir(parents=True, exist_ok=True)
+        for source in source_cache.glob("stock-*-l1000-o0.json.gz"):
+            shutil.copy2(source, destination_cache / source.name)
+            copied_cache_files += 1
+    print(
+        f"ใช้ persistent detail cache ที่ตรวจ signature ได้ {copied_cache_files} ไฟล์",
+        flush=True,
+    )
 
 
 def start_snapshot_server(runtime_root: Path, snapshot_db: Path):
