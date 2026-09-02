@@ -401,7 +401,11 @@ def main() -> int:
             manifest = {
                 "schema_version": 1,
                 "generated_at": generated_at,
-                "source_release": status.get("daily_ingest_release") or status.get("quality_policy", {}).get("release"),
+                "source_release": (
+                    status.get("quality_policy_release")
+                    or status.get("daily_ingest_release")
+                    or status.get("quality_policy", {}).get("release")
+                ),
                 "stock_count": len(stocks),
                 "file_count": file_count + 1,
                 "site_bytes": total_bytes,

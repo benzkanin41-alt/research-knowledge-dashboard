@@ -153,6 +153,16 @@ def main() -> int:
         errors.append(f"manifest stock_count {manifest.get('stock_count')} != index {len(stocks)}")
     if status.get("online_snapshot", {}).get("stock_count_with_data") != len(stocks):
         errors.append("status stock_count_with_data ไม่ตรงกับ stocks index")
+    expected_release = (
+        status.get("quality_policy_release")
+        or status.get("daily_ingest_release")
+        or status.get("quality_policy", {}).get("release")
+    )
+    if manifest.get("source_release") != expected_release:
+        errors.append(
+            "manifest source_release ไม่ตรงกับ terminal quality release: "
+            f"{manifest.get('source_release')} != {expected_release}"
+        )
 
     ids = [int(item["id"]) for item in stocks]
     symbols = [str(item["symbol"]).upper() for item in stocks]
