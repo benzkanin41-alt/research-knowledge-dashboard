@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Research Knowledge Dashboard</title>
+  <link rel="stylesheet" href="./styles.css">
+
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'">
+  <link rel="stylesheet" href="./online.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div><strong>Research Knowledge</strong><span>Online snapshot</span></div>
+      </div>
+
+      <label class="search-box">
+        <span>ค้นหาหุ้น</span>
+        <input id="stock-search" type="search" placeholder="Ticker หรือชื่อหุ้น…" autocomplete="off">
+      </label>
+
+      <div id="stock-count" class="muted compact"></div>
+      <div id="stock-list" class="stock-list" aria-live="polite"></div>
+
+      <div class="sidebar-footer">
+        <button id="update-button" class="primary-button">อัปเดตข้อมูลถึงเมื่อวาน</button>
+        <div id="update-message" class="muted compact">กำลังอ่านสถานะ…</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section id="empty-state" class="empty-state">
+        <div class="empty-icon">⌕</div>
+        <h1>เลือกหุ้นเพื่อเปิดฐานความรู้</h1>
+        <p>ค้นหาได้ทั้งหุ้นไทยและต่างประเทศ ข้อมูลมาจากไฟล์ Research MD ในเครื่องเท่านั้น</p>
+        <div id="database-summary" class="summary-strip"></div>
+      </section>
+
+      <section id="stock-view" class="stock-view hidden">
+        <header class="stock-header">
+          <div>
+            <div class="eyebrow">ฐานความรู้รายหุ้น</div>
+            <h1><span id="stock-symbol"></span> <small id="stock-name"></small></h1>
+            <div id="stock-aliases" class="muted"></div>
+          </div>
+          <div id="coverage-badges" class="badge-row"></div>
+        </header>
+
+        <nav class="tabs" aria-label="Stock sections">
+          <button class="tab active" data-tab="overview">ภาพรวม & Latest Broker</button>
+          <button class="tab" data-tab="metrics">ประมาณการเทียบผลจริง</button>
+          <button class="tab" data-tab="knowledge">รายละเอียดรายวันทั้งหมด</button>
+          <button class="tab" data-tab="sources">แหล่งข้อมูล</button>
+        </nav>
+
+        <section id="tab-overview" class="tab-panel">
+          <div id="hero-cards" class="hero-grid"></div>
+          <div class="two-column">
+            <article class="panel">
+              <div class="panel-heading">
+                <div><span class="eyebrow">LATEST BY BROKER</span><h2>Target Price ล่าสุดแต่ละสำนัก</h2></div>
+                <span class="muted compact">เลือก Target และ Rating ล่าสุดแยกกัน</span>
+              </div>
+              <div id="target-chart" class="target-chart"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">RATING MIX</span><h2>มุมมองล่าสุด</h2></div></div>
+              <div id="rating-mix" class="rating-mix"></div>
+            </article>
+          </div>
+          <div id="broker-cards" class="broker-grid"></div>
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">RECENT KNOWLEDGE</span><h2>รายละเอียดล่าสุดของหุ้น</h2></div><button class="text-button" data-jump="knowledge">ดูทั้งหมด</button></div>
+            <div id="recent-knowledge" class="timeline"></div>
+          </article>
+        </section>
+
+        <section id="tab-metrics" class="tab-panel hidden">
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">ESTIMATES & ACTUALS</span><h2>รายได้ กำไร และ Margin</h2></div><div id="metric-filters" class="chip-row"></div></div>
+            <div class="table-wrap"><table id="metrics-table"><thead><tr><th>งวด</th><th>Metric</th><th>ประเภท</th><th>สำนัก</th><th>ค่า</th><th>วันที่</th><th>หลักฐาน</th></tr></thead><tbody></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">FORECAST CHECK</span><h2>ประมาณการตรงกับผลจริงแค่ไหน</h2></div></div>
+            <div id="comparison-list" class="comparison-list"></div>
+          </article>
+        </section>
+
+        <section id="tab-knowledge" class="tab-panel hidden">
+          <article class="panel filter-panel">
+            <label>กรองประเภท<select id="knowledge-type"><option value="">ทั้งหมด</option></select></label>
+            <label>ค้นหาในหุ้นนี้<input id="knowledge-search" type="search" placeholder="ข่าว, margin, backlog…"></label>
+            <label>เรียงลำดับ<select id="knowledge-sort"><option value="desc">ใหม่ → เก่า</option><option value="asc">เก่า → ใหม่</option></select></label>
+          </article>
+          <div id="knowledge-timeline" class="timeline"></div>
+        </section>
+
+        <section id="tab-sources" class="tab-panel hidden">
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">PROVENANCE</span><h2>ไฟล์ MD ที่กล่าวถึงหุ้นนี้</h2></div></div>
+            <div class="table-wrap"><table id="sources-table"><thead><tr><th>วันที่</th><th>ไฟล์</th><th>ช่วงบรรทัด</th><th>รายการ</th><th>SHA-256</th></tr></thead><tbody></tbody></table></div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="update-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="panel-heading"><div><span class="eyebrow">UPDATE CENTER</span><h2>สถานะการอัปเดต</h2></div><button class="icon-button" value="cancel" aria-label="ปิด">×</button></div>
+      <div id="update-detail"></div>
+      <h3>รายการที่ต้องตรวจทาน</h3>
+      <div id="review-list" class="review-list"></div>
+    </form>
+  </dialog>
+
+  <script src="./online-adapter.js"></script>
+  <script src="./app.js" defer></script>
+  <script src="./online-runtime.js" defer></script>
+</body>
+</html>

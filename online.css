@@ -1,0 +1,46 @@
+.online-snapshot-banner {
+  align-items: center;
+  background: #fff7dc;
+  border: 1px solid #e4b553;
+  border-radius: 16px;
+  color: #12384b;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin: 0 0 14px;
+  padding: 11px 16px;
+}
+
+.online-snapshot-banner div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.online-snapshot-banner span,
+.online-disclaimer {
+  color: #526973;
+  font-size: 0.82rem;
+}
+
+.online-safe-label {
+  background: #edf6f3;
+  border-radius: 999px;
+  color: #176c58;
+  display: inline-block;
+  font-size: 0.76rem;
+  padding: 4px 8px;
+}
+
+#update-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+@media (max-width: 760px) {
+  .online-snapshot-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+}
