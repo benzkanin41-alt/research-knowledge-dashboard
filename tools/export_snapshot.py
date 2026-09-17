@@ -4,6 +4,9 @@ import argparse
 import concurrent.futures
 import hashlib
 import importlib
+import io
+from contextlib import closing
+from email.message import Message
 import json
 import os
 import re
@@ -37,10 +40,11 @@ DROP_KEYS = {
 WINDOWS_PATH_RE = re.compile(r"(?i)(?<![A-Za-z0-9])(?:[A-Z]:[\\/])[^\r\n\]\[(){}<>\"']+")
 UNC_PATH_RE = re.compile(r"\\\\[^\s\\/]+[\\/][^\r\n\]\[(){}<>\"']+")
 TOKEN_RE = re.compile(r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
+_SNAPSHOT_APPLICATION=None
 
 
 def compact_json(payload: Any) -> bytes:
-    return json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+    return json.dumps(payload, ensure_ascii=False, default=str, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
 def write_bytes(path: Path, data: bytes) -> None:
@@ -64,18 +68,22 @@ def sha256_file(path: Path) -> str:
 
 def readonly_connection(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+    if hasattr(connection, "setconfig") and hasattr(sqlite3, "SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE"):
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
     connection.row_factory = sqlite3.Row
     return connection
 
 
 def assert_idle_database(path: Path) -> dict[str, Any] | None:
-    with readonly_connection(path) as database:
+    with closing(readonly_connection(path)) as database:
         running = database.execute(
             "SELECT id,started_at,status FROM import_runs WHERE status IN ('queued','running') ORDER BY id DESC"
         ).fetchall()
         if running:
             raise RuntimeError(f"พบ import ที่กำลังทำงาน: {[dict(row) for row in running]}")
         latest = database.execute("SELECT * FROM import_runs ORDER BY id DESC LIMIT 1").fetchone()
+        if not latest or latest["status"] != "success":
+            raise RuntimeError("Local import ล่าสุดยังไม่สำเร็จ จึงห้ามสร้าง snapshot เพื่อ Deploy")
         return dict(latest) if latest else None
 
 
@@ -93,11 +101,40 @@ def backup_database(source_path: Path, destination_path: Path) -> None:
         source.close()
 
 
+def assert_release_validation(local_root: Path, latest_run: dict[str, Any]) -> dict[str, Any]:
+    path=local_root/'qa_release_validation.json'
+    if not path.exists():raise RuntimeError('Missing complete Local Skill quality proof; import success alone cannot authorize deployment')
+    proof=json.loads(path.read_text(encoding='utf-8'))
+    quality=proof.get('quality') or {}
+    if (proof.get('status') not in {'success','success_with_review'} or proof.get('latest_import_id')!=latest_run.get('id')
+        or (quality.get('regressions') or {}).get('status')!='passed' or quality.get('canonical_code_unchanged') is not True
+        or (proof.get('primary_actual_provenance_audit_v68') or {}).get('failure_count')!=0):
+        raise RuntimeError('Local release proof is failed, partial or superseded by a later import')
+    if not proof.get('verified_code_hashes') or not proof.get('verified_database_files'):
+        raise RuntimeError('Local release proof has no code/database fingerprint')
+    for name,digest in proof['verified_code_hashes'].items():
+        file=(local_root/name).resolve()
+        if not file.is_relative_to(local_root) or not file.is_file() or sha256_file(file)!=digest:
+            raise RuntimeError('Local code changed after full validation: '+name)
+    for name,expected in proof['verified_database_files'].items():
+        file=(local_root/name).resolve()
+        if not file.is_relative_to(local_root) or not file.is_file() or file.stat().st_size!=expected['size'] or sha256_file(file)!=expected['sha256']:
+            raise RuntimeError('Local database changed after full validation: '+name)
+        if not name.endswith('-wal'):
+            wal_name=name+'-wal'
+            wal=local_root/wal_name
+            if wal.is_file() and wal.stat().st_size and wal_name not in proof['verified_database_files']:
+                raise RuntimeError('Local database acquired an unvalidated WAL: '+wal_name)
+    return {'status':'passed','cutoff':proof.get('cutoff'),'finished_at':proof.get('finished_at'),'latest_import_id':latest_run['id']}
+
+
 def copy_runtime(local_root: Path, runtime_root: Path) -> None:
     runtime_root.mkdir(parents=True, exist_ok=True)
     for source in local_root.glob("*.py"):
         shutil.copy2(source, runtime_root / source.name)
     shutil.copy2(local_root / "config.json", runtime_root / "config.json")
+    if (local_root/'source_scope_v68.json').is_file():
+        shutil.copy2(local_root/'source_scope_v68.json',runtime_root/'source_scope_v68.json')
     shutil.copytree(local_root / "web", runtime_root / "web", dirs_exist_ok=True)
     copied_cache_files = 0
     for cache_name in ("detail_cache_v52", "detail_cache_v59"):
@@ -113,9 +150,40 @@ def copy_runtime(local_root: Path, runtime_root: Path) -> None:
         f"ใช้ persistent detail cache ที่ตรวจ signature ได้ {copied_cache_files} ไฟล์",
         flush=True,
     )
+    v68_cache=local_root/'data'/'detail_cache_v68'
+    if v68_cache.is_dir():
+        shutil.copytree(v68_cache,runtime_root/'data'/'detail_cache_v68',dirs_exist_ok=True)
+
+
+class SnapshotApplication:
+    """Render the copied application's GET handlers without binding a port.
+
+    This preserves the real HTML/API wrapper chain and does not create an
+    unregistered ephemeral dashboard service or access the live database.
+    """
+    def __init__(self, handler_type):
+        self.handler_type=handler_type
+
+    def get(self,path):
+        handler=object.__new__(self.handler_type)
+        handler.command='GET';handler.path=path
+        handler.request_version='HTTP/1.1';handler.requestline='GET '+path+' HTTP/1.1'
+        handler.client_address=('snapshot',0);handler.headers=Message()
+        handler.rfile=io.BytesIO();handler.wfile=io.BytesIO()
+        handler.close_connection=True;handler.log_message=lambda *args:None
+        handler.do_GET()
+        header,separator,body=handler.wfile.getvalue().partition(b'\r\n\r\n')
+        if not separator:raise RuntimeError('Snapshot handler did not render HTTP headers')
+        status=int(header.split(b' ',2)[1])
+        if status!=200:raise RuntimeError(f'Snapshot GET failed: {path}: HTTP {status}')
+        return body
+
+    def shutdown(self):pass
+    def server_close(self):pass
 
 
 def start_snapshot_server(runtime_root: Path, snapshot_db: Path):
+    global _SNAPSHOT_APPLICATION
     sys.path.insert(0, str(runtime_root))
     importlib.invalidate_caches()
     importlib.import_module("dashboard_final_user")
@@ -123,14 +191,14 @@ def start_snapshot_server(runtime_root: Path, snapshot_db: Path):
     resolved_server_db = Path(server.DB_PATH).resolve()
     if resolved_server_db != snapshot_db.resolve():
         raise RuntimeError(f"Runtime ใช้ฐานผิดไฟล์: {resolved_server_db} != {snapshot_db.resolve()}")
-    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.DashboardHandler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True, name="snapshot-runtime")
-    thread.start()
-    host, port = httpd.server_address
-    return httpd, thread, f"http://{host}:{port}"
+    _SNAPSHOT_APPLICATION=SnapshotApplication(server.DashboardHandler)
+    return _SNAPSHOT_APPLICATION,None,'snapshot://research'
 
 
 def fetch_bytes(url: str, timeout: int = 180) -> bytes:
+    if url.startswith('snapshot://research/'):
+        if _SNAPSHOT_APPLICATION is None:raise RuntimeError('Snapshot application not initialized')
+        return _SNAPSHOT_APPLICATION.get(url.removeprefix('snapshot://research'))
     request = urllib.request.Request(url, headers={"User-Agent": "ResearchDashboardSnapshot/1.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
@@ -179,8 +247,19 @@ def sanitize_payload(value: Any) -> Any:
     return value
 
 
+def public_numeric_coordinates(value,location='$'):
+    """Independent parity proof for every numeric public field, not just counts."""
+    if isinstance(value,dict):
+        for key,child in value.items():
+            if str(key).lower() in DROP_KEYS or key=='quote':continue
+            yield from public_numeric_coordinates(child,location+'.'+str(key))
+    elif isinstance(value,list):
+        for index,child in enumerate(value):yield from public_numeric_coordinates(child,f'{location}[{index}]')
+    elif isinstance(value,(int,float)) and not isinstance(value,bool):yield (location,value)
+
+
 def active_stock_index(snapshot_db: Path) -> list[dict[str, Any]]:
-    with sqlite3.connect(snapshot_db) as database:
+    with closing(readonly_connection(snapshot_db)) as database:
         database.row_factory = sqlite3.Row
         rows = database.execute(
             """
@@ -289,11 +368,13 @@ def main() -> int:
         raise RuntimeError("Output ต้องแยกจาก Local Dashboard")
 
     latest_run = assert_idle_database(source_db)
+    validation_proof = assert_release_validation(local_root, latest_run)
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     prepare_output(output)
     report: dict[str, Any] = {
         "generated_at": generated_at,
         "latest_import_run": latest_run,
+        "local_release_validation": validation_proof,
         "stocks": 0,
         "parity_failures": [],
         "quote_available": 0,
@@ -353,14 +434,18 @@ def main() -> int:
                 }
                 if counts != clean_counts:
                     raise RuntimeError(f"Sanitizer ทำจำนวนรายการเปลี่ยน: {stock['symbol']} {counts} != {clean_counts}")
-                quote = clean.get("quote") or {}
-                if quote.get("loading") or not quote.get("fetched_at"):
-                    quote_url = (
-                        f"{base_url}/api/quotes/"
-                        f"{urllib.parse.quote(str(stock['symbol']), safe='')}"
-                    )
-                    quote = sanitize_payload(fetch_json_with_retry(quote_url, timeout=90, attempts=3))
-                    clean["quote"] = quote
+                if list(public_numeric_coordinates(source))!=list(public_numeric_coordinates(clean)):
+                    raise RuntimeError(f"Public numeric coordinates changed: {stock['symbol']}")
+                # A persisted detail payload can contain an older fetched_at.
+                # Always consult the isolated quote provider, which applies its
+                # normal SET freshness policy. Never treat an old detail-cache
+                # quote as newly fetched merely because this export is new.
+                quote_url = (
+                    f"{base_url}/api/quotes/"
+                    f"{urllib.parse.quote(str(stock['symbol']), safe='')}"
+                )
+                quote = sanitize_payload(fetch_json_with_retry(quote_url, timeout=90, attempts=3))
+                clean["quote"] = quote
                 if not quote:
                     quote = {
                         "available": False,
@@ -382,7 +467,10 @@ def main() -> int:
                     except Exception as exc:
                         report["parity_failures"].append({"id": stock["id"], "symbol": stock["symbol"], "error": str(exc)})
                         continue
-                    write_json(output / "data" / "stocks" / f"{stock['id']}.json", detail)
+                    detail_path=output / "data" / "stocks" / f"{stock['id']}.json"
+                    write_json(detail_path, detail)
+                    if json.loads(detail_path.read_text(encoding='utf-8'))!=detail:
+                        raise RuntimeError(f"Written snapshot differs from sanitized Local API: {stock['symbol']}")
                     write_json(output / "data" / "quotes" / f"q-{stock['symbol']}.json", quote)
                     if quote.get("available"):
                         report["quote_available"] += 1
@@ -420,8 +508,12 @@ def main() -> int:
         finally:
             httpd.shutdown()
             httpd.server_close()
-            thread.join(timeout=10)
+            if thread is not None:thread.join(timeout=10)
 
+    # Recheck the exact code, database and WAL proof after exporting. An idle
+    # import row at the start is not enough if another update began meanwhile.
+    report['local_release_validation_after_export']=assert_release_validation(
+        local_root,assert_idle_database(source_db))
     print("[5/5] สร้าง Online snapshot สำเร็จ", flush=True)
     report_path = PROJECT_ROOT / "work" / "export-report.json"
     write_json(report_path, report)

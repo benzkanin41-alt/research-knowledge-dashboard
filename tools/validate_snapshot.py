@@ -129,6 +129,13 @@ def validate_known_cases(symbol_to_detail: dict[str, dict[str, Any]]) -> list[st
     return errors
 
 
+def coverage_notes_are_safe(detail: dict[str, Any]) -> bool:
+    prefix='ยังไม่มีตัวเลขประมาณการของงวดและหัวข้อนี้ที่ผ่านการยืนยัน'
+    return all(str(note.get('reason') or '').startswith(prefix)
+               for group in detail.get('metric_groups') or []
+               for note in group.get('covered_without_number') or [])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the static Research Dashboard snapshot.")
     parser.add_argument("--site", type=Path, default=DEFAULT_SITE)
@@ -183,6 +190,8 @@ def main() -> int:
             errors.append(f"ขาด quote {symbol}")
         detail = load_json(detail_path)
         symbol_to_detail[symbol] = detail
+        if not coverage_notes_are_safe(detail):
+            errors.append(f'unverified multi-company coverage excerpt remains: {symbol}')
         if str(detail.get("stock", {}).get("symbol") or "").upper() != symbol:
             errors.append(f"detail symbol ไม่ตรง: {symbol}")
         for location, value in walk_json(detail):
@@ -197,6 +206,13 @@ def main() -> int:
         text = json_path.read_text(encoding="utf-8", errors="replace")
         if TOKEN_RE.search(text):
             errors.append(f"privacy scan ไม่ผ่าน: {json_path.relative_to(site)}")
+        for location, value in walk_json(json.loads(text)):
+            if isinstance(value, dict) and FORBIDDEN_KEYS.intersection(str(key).lower() for key in value):
+                errors.append(f"internal key ไม่ผ่าน: {json_path.relative_to(site)}:{location}")
+            elif isinstance(value, str) and (WINDOWS_PATH_RE.search(value) or UNC_PATH_RE.search(value) or TOKEN_RE.search(value)):
+                # Inspect decoded JSON values: escaped quotes/newlines in the
+                # serialized JSON are not network paths.
+                errors.append(f"privacy value ไม่ผ่าน: {json_path.relative_to(site)}:{location}")
 
     total_bytes = 0
     largest_file = ("", 0)
@@ -205,6 +221,12 @@ def main() -> int:
         if not path.is_file():
             continue
         size = path.stat().st_size
+        if path.suffix.lower() in {'.html','.js','.css','.txt','.json'}:
+            asset_text=path.read_text(encoding='utf-8',errors='replace')
+            if TOKEN_RE.search(asset_text) or WINDOWS_PATH_RE.search(asset_text):
+                errors.append(f'private path/token in public asset: {path.relative_to(site)}')
+        if path.suffix.lower() in {".pdf", ".md", ".sqlite", ".sqlite3", ".db"} or path.name.lower().endswith(("-wal", "-shm")):
+            errors.append(f"ห้ามเผยแพร่ไฟล์ต้นฉบับ/ฐานข้อมูล: {path.relative_to(site)}")
         total_bytes += size
         file_count += 1
         if size > largest_file[1]:
