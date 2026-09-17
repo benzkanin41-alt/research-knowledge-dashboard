@@ -53,6 +53,19 @@ class SnapshotContracts(unittest.TestCase):
         self.assertIsNotNone(validation.UNC_PATH_RE.search(r'\\server\private\file'))
         self.assertIsNotNone(validation.WINDOWS_PATH_RE.search(r'D:\private\file'))
 
+    def test_json_control_escapes_are_not_drive_paths(self):
+        for text in ('Core Operation G:\b TOP', 'Project Finance \b:\u001a text'):
+            serialized=json.dumps({'reason':text})
+            self.assertIsNotNone(validation.WINDOWS_PATH_RE.search(serialized))
+            self.assertFalse(validation.public_asset_has_private_data(serialized,'.json'))
+
+    def test_decoded_asset_scan_still_rejects_real_paths_and_tokens(self):
+        for text in (r'G:\b\private.pdf',r'C:\Users\private\file',r'\\nas\private\file','ghp_'+'a'*24):
+            self.assertTrue(validation.public_asset_has_private_data(json.dumps({'reason':text}),'.json'))
+            self.assertTrue(validation.public_asset_has_private_data(json.dumps({text:'value'}),'.json'))
+        self.assertTrue(validation.public_asset_has_private_data(r'{"reason":"\u0043:\\private\\file"}', '.json'))
+        self.assertTrue(validation.public_asset_has_private_data(r'<p>C:\private\file</p>', '.html'))
+
     def test_snapshot_requires_latest_success_and_no_running_import(self):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'fixture.sqlite'

@@ -44,6 +44,22 @@ def walk_json(value: Any, location: str = "$") -> Iterable[tuple[str, Any]]:
             yield from walk_json(child, f"{location}[{index}]")
 
 
+def public_asset_has_private_data(text: str, suffix: str) -> bool:
+    def private_string(value: str) -> bool:
+        return bool(WINDOWS_PATH_RE.search(value) or UNC_PATH_RE.search(value) or TOKEN_RE.search(value))
+
+    if suffix.lower() == ".json":
+        # JSON escapes such as G:\b or b:\u001a are not disk paths.
+        # Decode first, while still inspecting every string and dictionary key.
+        for _location, value in walk_json(json.loads(text)):
+            if isinstance(value, str) and private_string(value):
+                return True
+            if isinstance(value, dict) and any(private_string(str(key)) for key in value):
+                return True
+        return False
+    return bool(TOKEN_RE.search(text) or WINDOWS_PATH_RE.search(text))
+
+
 def broker_name(item: dict[str, Any]) -> str:
     return str(item.get("analyst") or "").lower()
 
@@ -223,7 +239,7 @@ def main() -> int:
         size = path.stat().st_size
         if path.suffix.lower() in {'.html','.js','.css','.txt','.json'}:
             asset_text=path.read_text(encoding='utf-8',errors='replace')
-            if TOKEN_RE.search(asset_text) or WINDOWS_PATH_RE.search(asset_text):
+            if public_asset_has_private_data(asset_text, path.suffix):
                 errors.append(f'private path/token in public asset: {path.relative_to(site)}')
         if path.suffix.lower() in {".pdf", ".md", ".sqlite", ".sqlite3", ".db"} or path.name.lower().endswith(("-wal", "-shm")):
             errors.append(f"ห้ามเผยแพร่ไฟล์ต้นฉบับ/ฐานข้อมูล: {path.relative_to(site)}")
