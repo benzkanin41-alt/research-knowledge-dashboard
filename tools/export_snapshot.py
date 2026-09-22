@@ -328,7 +328,7 @@ def transform_index(index_html: str) -> str:
     index_html = index_html.replace("Local dashboard", "Online snapshot")
     head_additions = (
         '\n  <meta name="robots" content="noindex,nofollow">'
-        '\n  <meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; connect-src \'self\'; frame-ancestors \'none\'">'
+        '\n  <meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:; connect-src \'self\'">'
         '\n  <link rel="stylesheet" href="./online.css">\n'
     )
     index_html = index_html.replace("</head>", f"{head_additions}</head>")

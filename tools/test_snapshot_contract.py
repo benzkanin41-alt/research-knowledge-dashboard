@@ -13,6 +13,12 @@ except ImportError:
 
 
 class SnapshotContracts(unittest.TestCase):
+    def test_static_meta_csp_omits_unsupported_frame_ancestors_directive(self):
+        source = '<html><head></head><body><script src="/app.js" defer></script></body></html>'
+        transformed = export.transform_index(source)
+        self.assertIn('Content-Security-Policy', transformed)
+        self.assertNotIn('frame-ancestors', transformed)
+
     def test_quote_asset_filename_uses_only_stable_numeric_stock_id(self):
         unsafe_symbol = 'AI BUILDOUT ทั่วโลก: ห่วงโซ่อุปทาน/2029'
         self.assertEqual(export.quote_asset_name(1272), 'q-1272.json')
