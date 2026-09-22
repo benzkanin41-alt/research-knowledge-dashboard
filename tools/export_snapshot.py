@@ -133,8 +133,12 @@ def copy_runtime(local_root: Path, runtime_root: Path) -> None:
     for source in local_root.glob("*.py"):
         shutil.copy2(source, runtime_root / source.name)
     shutil.copy2(local_root / "config.json", runtime_root / "config.json")
-    if (local_root/'source_scope_v68.json').is_file():
-        shutil.copy2(local_root/'source_scope_v68.json',runtime_root/'source_scope_v68.json')
+    # Scope ledgers are executable runtime dependencies: each dashboard layer
+    # reads its own reviewed ledger when computing a stock-detail signature.
+    # Copy every versioned scope ledger so a new Local release cannot render
+    # the stock index successfully but fail every detail request in isolation.
+    for source_scope in sorted(local_root.glob("source_scope_v*.json")):
+        shutil.copy2(source_scope, runtime_root / source_scope.name)
     shutil.copytree(local_root / "web", runtime_root / "web", dirs_exist_ok=True)
     copied_cache_files = 0
     for cache_name in ("detail_cache_v52", "detail_cache_v59"):
@@ -221,6 +225,34 @@ def fetch_json_with_retry(url: str, timeout: int = 180, attempts: int = 4) -> An
     raise RuntimeError(
         f"Snapshot API failed after {attempts} attempts: {url}: {last_error}"
     ) from last_error
+
+
+def fetch_quote_snapshot(base_url: str, symbol: str, generated_at: str) -> dict[str, Any]:
+    quote_url = f"{base_url}/api/quotes/{urllib.parse.quote(str(symbol), safe='')}"
+    try:
+        quote = sanitize_payload(fetch_json_with_retry(quote_url, timeout=90, attempts=3))
+    except RuntimeError as exc:
+        # A stock-like knowledge identity, foreign instrument, or inactive SET
+        # symbol can legitimately have no SET quote. Only an explicit 404 is
+        # converted to the public unavailable state; server/runtime failures
+        # remain blocking so a broken quote provider cannot pass silently.
+        if "HTTP 404" not in str(exc):
+            raise
+        quote = {}
+    if quote:
+        return quote
+    return {
+        "available": False,
+        "symbol": symbol,
+        "source_name": "ตลาดหลักทรัพย์แห่งประเทศไทย (SET)",
+        "fetched_at": generated_at,
+        "error": "ไม่พบราคาใน snapshot",
+    }
+
+
+def quote_asset_name(stock_id: int) -> str:
+    """Use the stable numeric stock id, never an untrusted display symbol, as a filename."""
+    return f"q-{int(stock_id)}.json"
 
 
 def sanitize_string(value: str) -> str:
@@ -440,21 +472,8 @@ def main() -> int:
                 # Always consult the isolated quote provider, which applies its
                 # normal SET freshness policy. Never treat an old detail-cache
                 # quote as newly fetched merely because this export is new.
-                quote_url = (
-                    f"{base_url}/api/quotes/"
-                    f"{urllib.parse.quote(str(stock['symbol']), safe='')}"
-                )
-                quote = sanitize_payload(fetch_json_with_retry(quote_url, timeout=90, attempts=3))
+                quote = fetch_quote_snapshot(base_url, str(stock["symbol"]), generated_at)
                 clean["quote"] = quote
-                if not quote:
-                    quote = {
-                        "available": False,
-                        "symbol": stock["symbol"],
-                        "source_name": "ตลาดหลักทรัพย์แห่งประเทศไทย (SET)",
-                        "fetched_at": generated_at,
-                        "error": "ไม่พบราคาใน snapshot",
-                    }
-                    clean["quote"] = quote
                 return clean, quote, counts
 
             completed = 0
@@ -471,7 +490,7 @@ def main() -> int:
                     write_json(detail_path, detail)
                     if json.loads(detail_path.read_text(encoding='utf-8'))!=detail:
                         raise RuntimeError(f"Written snapshot differs from sanitized Local API: {stock['symbol']}")
-                    write_json(output / "data" / "quotes" / f"q-{stock['symbol']}.json", quote)
+                    write_json(output / "data" / "quotes" / quote_asset_name(stock["id"]), quote)
                     if quote.get("available"):
                         report["quote_available"] += 1
                     else:

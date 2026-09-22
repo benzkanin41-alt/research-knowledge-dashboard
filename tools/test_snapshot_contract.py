@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 try:
     from . import export_snapshot as export
@@ -12,6 +13,49 @@ except ImportError:
 
 
 class SnapshotContracts(unittest.TestCase):
+    def test_quote_asset_filename_uses_only_stable_numeric_stock_id(self):
+        unsafe_symbol = 'AI BUILDOUT ทั่วโลก: ห่วงโซ่อุปทาน/2029'
+        self.assertEqual(export.quote_asset_name(1272), 'q-1272.json')
+        self.assertNotIn(unsafe_symbol, export.quote_asset_name(1272))
+
+    def test_missing_set_quote_becomes_explicit_unavailable_state(self):
+        with mock.patch.object(
+            export,
+            'fetch_json_with_retry',
+            side_effect=RuntimeError('Snapshot GET failed: /api/quotes/NOTSET: HTTP 404'),
+        ):
+            quote = export.fetch_quote_snapshot('snapshot://research', 'NOTSET', '2026-09-23T00:00:00+07:00')
+        self.assertFalse(quote['available'])
+        self.assertEqual(quote['symbol'], 'NOTSET')
+        self.assertEqual(quote['error'], 'ไม่พบราคาใน snapshot')
+
+    def test_quote_runtime_failure_remains_blocking(self):
+        with mock.patch.object(
+            export,
+            'fetch_json_with_retry',
+            side_effect=RuntimeError('Snapshot GET failed: /api/quotes/PTT: HTTP 500'),
+        ):
+            with self.assertRaises(RuntimeError):
+                export.fetch_quote_snapshot('snapshot://research', 'PTT', '2026-09-23T00:00:00+07:00')
+
+    def test_copy_runtime_includes_every_versioned_scope_ledger(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / 'local'
+            runtime = Path(temp) / 'runtime'
+            (root / 'web').mkdir(parents=True)
+            (root / 'data').mkdir()
+            (root / 'config.json').write_text('{}', encoding='utf-8')
+            (root / 'dashboard_final_user.py').write_text('', encoding='utf-8')
+            (root / 'source_scope_v68.json').write_text('{"version":68}', encoding='utf-8')
+            (root / 'source_scope_v69.json').write_text('{"version":69}', encoding='utf-8')
+            (root / 'source_scope_notes.json').write_text('{}', encoding='utf-8')
+
+            export.copy_runtime(root, runtime)
+
+            self.assertEqual((runtime / 'source_scope_v68.json').read_text(encoding='utf-8'), '{"version":68}')
+            self.assertEqual((runtime / 'source_scope_v69.json').read_text(encoding='utf-8'), '{"version":69}')
+            self.assertFalse((runtime / 'source_scope_notes.json').exists())
+
     def test_unverified_multi_company_excerpt_cannot_be_published_as_rationale(self):
         bad={'metric_groups':[{'covered_without_number':[{'reason':'Buy DELTA. Banks KTB KBANK earnings 53300'}]}]}
         self.assertFalse(validation.coverage_notes_are_safe(bad))

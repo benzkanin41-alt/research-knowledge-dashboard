@@ -62,8 +62,14 @@
       const detailMatch = url.pathname.match(/^\/api\/stocks\/(\d+)$/);
       if (detailMatch) return jsonResponse(await loadJSON(`data/stocks/${detailMatch[1]}.json`));
 
-      const quoteMatch = url.pathname.match(/^\/api\/quotes\/([A-Za-z0-9.\-]+)$/);
-      if (quoteMatch) return jsonResponse(await loadJSON(`data/quotes/q-${encodeURIComponent(quoteMatch[1].toUpperCase())}.json`));
+      const quoteMatch = url.pathname.match(/^\/api\/quotes\/(.+)$/);
+      if (quoteMatch) {
+        const requestedSymbol = normalize(decodeURIComponent(quoteMatch[1]));
+        stockIndexPromise ||= loadJSON("data/stocks.json");
+        const stock = (await stockIndexPromise).find((item) => normalize(item.symbol) === requestedSymbol);
+        if (!stock) return jsonResponse({ error: "ไม่พบหุ้นสำหรับราคา Online" }, 404);
+        return jsonResponse(await loadJSON(`data/quotes/q-${stock.id}.json`));
+      }
 
       return jsonResponse({ error: "ไม่พบข้อมูล Online สำหรับ endpoint นี้" }, 404);
     } catch (error) {
