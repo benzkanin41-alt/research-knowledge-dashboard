@@ -36,13 +36,31 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def excluded_process_root(root: Path) -> Path | None:
+    """Ignore this run's E: scratch tree while protecting all Local sources."""
+    raw = os.environ.get("RESEARCH_DASHBOARD_PROCESS_ROOT")
+    if not raw:
+        return None
+    candidate = Path(raw).resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("process exclusion must stay inside the Local root") from exc
+    if len(relative.parts) != 2 or relative.parts[0].lower() != "work" or not relative.parts[1].startswith("update-"):
+        raise ValueError("process exclusion must be one work/update-* run directory")
+    return relative
+
+
 def capture(root: Path) -> dict[str, Any]:
     root = root.resolve()
+    excluded = excluded_process_root(root)
     files: dict[str, dict[str, Any]] = {}
     for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if excluded and relative.parts[: len(excluded.parts)] == excluded.parts:
+            continue
         if not path.is_file():
             continue
-        relative = path.relative_to(root)
         if is_volatile(relative):
             continue
         stat = path.stat()
@@ -53,6 +71,7 @@ def capture(root: Path) -> dict[str, Any]:
         }
     return {
         "root": str(root),
+        "excluded_process_root": excluded.as_posix() if excluded else None,
         "file_count": len(files),
         "files": files,
     }
@@ -66,6 +85,8 @@ def write_json(path: Path, payload: Any) -> None:
 
 
 def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    if baseline.get("root") != current.get("root") or baseline.get("excluded_process_root") != current.get("excluded_process_root"):
+        raise ValueError("Local integrity scope changed between capture and comparison")
     before = baseline["files"]
     after = current["files"]
     added = sorted(set(after) - set(before))
@@ -82,6 +103,7 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]
         "changed": changed,
         "baseline_file_count": len(before),
         "current_file_count": len(after),
+        "excluded_process_root": current.get("excluded_process_root"),
     }
 
 

@@ -365,6 +365,25 @@ def prepare_output(output: Path) -> None:
     output.mkdir(parents=True)
 
 
+def assert_output_isolated(local_root: Path, output: Path) -> None:
+    """Permit only this run's isolated E: process tree inside the Local root."""
+    if local_root != output and local_root not in output.parents:
+        return
+    raw = os.environ.get("RESEARCH_DASHBOARD_PROCESS_ROOT")
+    if not raw:
+        raise RuntimeError("Output ต้องแยกจาก Local Dashboard")
+    process_root = Path(raw).resolve()
+    try:
+        relative = process_root.relative_to(local_root)
+    except ValueError as exc:
+        raise RuntimeError("Output ต้องแยกจาก Local Dashboard") from exc
+    if (len(relative.parts) != 2 or relative.parts[0].lower() != "work"
+            or not relative.parts[1].startswith("update-")
+            or process_root not in output.parents
+            or PROJECT_ROOT.resolve() not in output.parents):
+        raise RuntimeError("Output ต้องแยกจาก Local Dashboard")
+
+
 def file_digest_summary(site_root: Path) -> tuple[int, int, str, int]:
     records: list[str] = []
     total_bytes = 0
@@ -396,8 +415,7 @@ def main() -> int:
     source_db = local_root / "data" / "research_dashboard_release.sqlite"
     if not source_db.exists():
         raise FileNotFoundError(f"ไม่พบ release database: {source_db}")
-    if local_root == output or local_root in output.parents:
-        raise RuntimeError("Output ต้องแยกจาก Local Dashboard")
+    assert_output_isolated(local_root, output)
 
     latest_run = assert_idle_database(source_db)
     validation_proof = assert_release_validation(local_root, latest_run)

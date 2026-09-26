@@ -43,4 +43,8 @@
     flex-direction: column;
     gap: 5px;
   }
+
+  .timeline-item h3 {
+    overflow-wrap: anywhere;
+  }
 }
