@@ -262,11 +262,16 @@ def sanitize_string(value: str) -> str:
     return value
 
 
+def private_payload_key(key: Any) -> bool:
+    name = str(key).lower()
+    return name in DROP_KEYS or name.endswith(("sha256", "_hash", "_hashes"))
+
+
 def sanitize_payload(value: Any) -> Any:
     if isinstance(value, dict):
         clean: dict[str, Any] = {}
         for key, item in value.items():
-            if str(key).lower() in DROP_KEYS:
+            if private_payload_key(key):
                 continue
             if str(key).lower() == "path" and isinstance(item, str) and (WINDOWS_PATH_RE.search(item) or UNC_PATH_RE.search(item)):
                 continue
@@ -283,7 +288,7 @@ def public_numeric_coordinates(value,location='$'):
     """Independent parity proof for every numeric public field, not just counts."""
     if isinstance(value,dict):
         for key,child in value.items():
-            if str(key).lower() in DROP_KEYS or key=='quote':continue
+            if private_payload_key(key) or key=='quote':continue
             yield from public_numeric_coordinates(child,location+'.'+str(key))
     elif isinstance(value,list):
         for index,child in enumerate(value):yield from public_numeric_coordinates(child,f'{location}[{index}]')

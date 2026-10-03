@@ -44,6 +44,11 @@ def walk_json(value: Any, location: str = "$") -> Iterable[tuple[str, Any]]:
             yield from walk_json(child, f"{location}[{index}]")
 
 
+def private_payload_key(key: Any) -> bool:
+    name = str(key).lower()
+    return name in FORBIDDEN_KEYS or name.endswith(("sha256", "_hash", "_hashes"))
+
+
 def public_asset_has_private_data(text: str, suffix: str) -> bool:
     def private_string(value: str) -> bool:
         return bool(WINDOWS_PATH_RE.search(value) or UNC_PATH_RE.search(value) or TOKEN_RE.search(value))
@@ -54,7 +59,7 @@ def public_asset_has_private_data(text: str, suffix: str) -> bool:
         for _location, value in walk_json(json.loads(text)):
             if isinstance(value, str) and private_string(value):
                 return True
-            if isinstance(value, dict) and any(private_string(str(key)) for key in value):
+            if isinstance(value, dict) and any(private_string(str(key)) or private_payload_key(key) for key in value):
                 return True
         return False
     return bool(TOKEN_RE.search(text) or WINDOWS_PATH_RE.search(text))
@@ -212,7 +217,7 @@ def main() -> int:
             errors.append(f"detail symbol ไม่ตรง: {symbol}")
         for location, value in walk_json(detail):
             if isinstance(value, dict):
-                forbidden = FORBIDDEN_KEYS.intersection(str(key).lower() for key in value)
+                forbidden = {str(key) for key in value if private_payload_key(key)}
                 if forbidden:
                     errors.append(f"พบ key ต้องห้าม {sorted(forbidden)} ที่ {symbol}:{location}")
             elif isinstance(value, str) and (WINDOWS_PATH_RE.search(value) or UNC_PATH_RE.search(value) or TOKEN_RE.search(value)):
@@ -223,7 +228,7 @@ def main() -> int:
         if TOKEN_RE.search(text):
             errors.append(f"privacy scan ไม่ผ่าน: {json_path.relative_to(site)}")
         for location, value in walk_json(json.loads(text)):
-            if isinstance(value, dict) and FORBIDDEN_KEYS.intersection(str(key).lower() for key in value):
+            if isinstance(value, dict) and any(private_payload_key(key) for key in value):
                 errors.append(f"internal key ไม่ผ่าน: {json_path.relative_to(site)}:{location}")
             elif isinstance(value, str) and (WINDOWS_PATH_RE.search(value) or UNC_PATH_RE.search(value) or TOKEN_RE.search(value)):
                 # Inspect decoded JSON values: escaped quotes/newlines in the

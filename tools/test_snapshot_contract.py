@@ -103,6 +103,39 @@ class SnapshotContracts(unittest.TestCase):
         self.assertIsNotNone(validation.UNC_PATH_RE.search(r'\\server\private\file'))
         self.assertIsNotNone(validation.WINDOWS_PATH_RE.search(r'D:\private\file'))
 
+    def test_native_model_evidence_hashes_are_private_but_values_and_quotes_survive(self):
+        raw = {'stock': {'id': 227, 'symbol': 'ADVANC'}, 'metric_groups': [{
+            'period_key': 'Q2-2026', 'metric_code': 'revenue', 'currency': 'THB', 'scale': 'million',
+            'actual': {'value': 56497, 'reasons': ['KGI reports 56,498; another source reports 56,497']},
+            'reviewed_table_actuals_v72': [{'value': 56498, 'line_start': 172,
+                'source_name': 'ADVANC-KGI.txt', 'date': '2026-09-30',
+                'source_cache_sha256': 'a' * 64, 'cache_sha256': 'b' * 64,
+                'source_proof': {'quote': 'Bt mn 2Q26 | Revenue 56,498',
+                                'quote_sha256': 'c' * 64, 'header_quote_hash': 'd' * 64}}]}]}
+        unchanged = json.dumps(raw, sort_keys=True)
+        clean = export.sanitize_payload(raw)
+        self.assertEqual(json.dumps(raw, sort_keys=True), unchanged)
+        self.assertEqual(list(export.public_numeric_coordinates(raw)), list(export.public_numeric_coordinates(clean)))
+        record = clean['metric_groups'][0]['reviewed_table_actuals_v72'][0]
+        self.assertEqual(record['value'], 56498)
+        self.assertEqual(record['source_proof'], {'quote': 'Bt mn 2Q26 | Revenue 56,498'})
+        self.assertEqual(record['source_name'], 'ADVANC-KGI.txt')
+        self.assertEqual(record['date'], '2026-09-30')
+        self.assertNotIn('source_cache_sha256', record)
+        self.assertNotIn('cache_sha256', record)
+        self.assertFalse(validation.public_asset_has_private_data(json.dumps(clean), '.json'))
+
+    def test_independent_validator_rejects_nested_source_hashes_and_preserves_public_digest(self):
+        for key in ('cache_sha256', 'SOURCE_CACHE_SHA256', 'quote_sha256', 'header_quote_hash',
+                    'verified_code_hashes', 'future_source_sha256'):
+            with self.subTest(key=key):
+                payload = {'rows': [{'evidence': {key: 'a' * 64}, 'estimate': -222}]}
+                self.assertTrue(validation.public_asset_has_private_data(json.dumps(payload), '.json'))
+                self.assertFalse(validation.public_asset_has_private_data(json.dumps(export.sanitize_payload(payload)), '.json'))
+        manifest = {'content_digest': 'f' * 64, 'stock_count': 1076}
+        self.assertEqual(export.sanitize_payload(manifest), manifest)
+        self.assertFalse(validation.public_asset_has_private_data(json.dumps(manifest), '.json'))
+
     def test_json_control_escapes_are_not_drive_paths(self):
         for text in ('Core Operation G:\b TOP', 'Project Finance \b:\u001a text'):
             serialized=json.dumps({'reason':text})
